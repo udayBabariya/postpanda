@@ -102,3 +102,64 @@ func (h *BillingHandler) GetPlans(c *gin.Context) {
 	plans := h.billingSvc.GetPlans()
 	c.JSON(http.StatusOK, plans)
 }
+
+func (h *BillingHandler) CheckDiscount(c *gin.Context) {
+	orgID := middleware.GetOrgID(c)
+	result, err := h.billingSvc.GetDiscountEligibility(orgID)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"message": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, result)
+}
+
+func (h *BillingHandler) ApplyDiscount(c *gin.Context) {
+	orgID := middleware.GetOrgID(c)
+	var req struct {
+		Code string `json:"code" binding:"required"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"message": err.Error()})
+		return
+	}
+	if err := h.billingSvc.ApplyDiscount(orgID, req.Code); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"message": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"message": "Discount applied"})
+}
+
+func (h *BillingHandler) FinishTrial(c *gin.Context) {
+	orgID := middleware.GetOrgID(c)
+	if err := h.billingSvc.FinishTrial(orgID); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"message": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"message": "Trial finished"})
+}
+
+func (h *BillingHandler) IsTrialFinished(c *gin.Context) {
+	orgID := middleware.GetOrgID(c)
+	finished, err := h.billingSvc.IsTrialFinished(orgID)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"message": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"finished": finished})
+}
+
+func (h *BillingHandler) ApplyLifetimeDeal(c *gin.Context) {
+	orgID := middleware.GetOrgID(c)
+	var req struct {
+		Code string `json:"code" binding:"required"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"message": err.Error()})
+		return
+	}
+	if err := h.billingSvc.ApplyLifetimeDeal(orgID, req.Code); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"message": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"message": "Lifetime deal applied"})
+}

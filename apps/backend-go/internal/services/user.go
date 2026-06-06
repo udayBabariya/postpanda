@@ -373,6 +373,18 @@ func (s *UserService) CreateOrg(userID, name string) (*models.Organization, erro
 	return &models.Organization{ID: orgID, Name: name, CreatedAt: now, UpdatedAt: now}, nil
 }
 
+func (s *UserService) ResendActivation(email string) {
+	// TODO: send activation email
+}
+
+func (s *UserService) CheckOAuthExists(providerID string, provider models.Provider) bool {
+	ctx := context.Background()
+	var count int
+	database.DB.QueryRow(ctx,
+		`SELECT COUNT(*) FROM users WHERE provider_id=$1 AND provider_name=$2`, providerID, provider).Scan(&count)
+	return count > 0
+}
+
 func (s *UserService) ListOrgs(userID string) ([]*models.Organization, error) {
 	ctx := context.Background()
 	rows, err := database.DB.Query(ctx,

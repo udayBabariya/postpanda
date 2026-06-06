@@ -37,6 +37,11 @@ func (s *Server) SetupRoutes() {
 	autoPostSvc := services.NewAutoPostService()
 	announcementSvc := services.NewAnnouncementService()
 	oauthAppSvc := services.NewOAuthAppService()
+	copilotSvc := services.NewCopilotService()
+	adminSvc := services.NewAdminService()
+	commentSvc := services.NewCommentService()
+	plugsSvc := services.NewPlugsService()
+	customerSvc := services.NewCustomerService()
 
 	// Handlers
 	authH := handlers.NewAuthHandler(userSvc)
@@ -55,6 +60,12 @@ func (s *Server) SetupRoutes() {
 	autoPostH := handlers.NewAutoPostHandler(autoPostSvc)
 	announcementsH := handlers.NewAnnouncementsHandler(announcementSvc)
 	oauthAppH := handlers.NewOAuthAppHandler(oauthAppSvc)
+	copilotH := handlers.NewCopilotHandler(copilotSvc)
+	adminH := handlers.NewAdminHandler(adminSvc)
+	monitorH := handlers.NewMonitorHandler()
+	enterpriseH := handlers.NewEnterpriseHandler(userSvc, billingSvc)
+	publicAPIH := handlers.NewPublicAPIHandler(postSvc, commentSvc)
+	plugsH := handlers.NewPlugsHandler(plugsSvc, customerSvc)
 
 	// Middleware
 	s.router.Use(middleware.CORS())
@@ -85,12 +96,23 @@ func (s *Server) SetupRoutes() {
 		authGroup.GET("/google/callback", authH.GoogleCallback)
 	}
 
+	// Auth mobile (unauthenticated)
+	s.router.GET("/auth/oauth-mobile-callback", authH.OAuthMobileCallback)
+
 	// Stripe webhook (raw body needed)
 	s.router.POST("/stripe/webhook", billingH.StripeWebhook)
 
 	// Public OAuth app endpoints
 	s.router.GET("/oauth/authorize", oauthAppH.AuthorizeOAuth)
 	s.router.POST("/oauth/token", oauthAppH.TokenExchange)
+
+	// Monitor (unauthenticated)
+	s.router.GET("/monitor/health", monitorH.Health)
+	s.router.GET("/monitor/queue/:name", monitorH.GetQueueStats)
+
+	// Public post preview (unauthenticated)
+	s.router.GET("/public/posts/:id", publicAPIH.GetPostPreview)
+	s.router.GET("/public/posts/:id/comments", publicAPIH.GetPostComments)
 
 	// Authenticated API routes
 	api := s.router.Group("/api")
@@ -99,6 +121,9 @@ func (s *Server) SetupRoutes() {
 		// Auth
 		api.GET("/auth/me", authH.Me)
 		api.POST("/auth/switch/:orgId", authH.SwitchOrg)
+		api.GET("/auth/can-register", authH.CanRegister)
+		api.POST("/auth/resend-activation", authH.ResendActivation)
+		api.POST("/auth/oauth/:provider/exists", authH.CheckOAuthExists)
 
 		// Users
 		api.GET("/users/profile", usersH.GetProfile)
@@ -114,6 +139,11 @@ func (s *Server) SetupRoutes() {
 		// Posts
 		api.GET("/posts", postsH.List)
 		api.POST("/posts", postsH.Create)
+		api.GET("/posts/old", postsH.GetOldPosts)
+		api.POST("/posts/valid", postsH.ValidatePosts)
+		api.POST("/posts/should-shortlink", postsH.CheckShortlink)
+		api.GET("/posts/find-slot", postsH.FindSlot)
+		api.GET("/posts/find-slot/:id", postsH.FindSlot)
 		api.GET("/posts/:id", postsH.Get)
 		api.PUT("/posts/:id", postsH.Update)
 		api.DELETE("/posts/:id", postsH.Delete)
@@ -121,6 +151,10 @@ func (s *Server) SetupRoutes() {
 		api.POST("/posts/:id/submit", postsH.SubmitForApproval)
 		api.POST("/posts/:id/approve", postsH.Approve)
 		api.GET("/posts/:id/analytics", postsH.GetAnalytics)
+		api.GET("/posts/:id/statistics", postsH.GetStatistics)
+		api.GET("/posts/:id/missing", postsH.GetMissing)
+		api.GET("/posts/:id/comments", publicAPIH.GetPostComments)
+		api.POST("/posts/:id/comments", publicAPIH.CreateComment)
 		api.GET("/posts/group/:groupId", postsH.GetGroup)
 		api.DELETE("/posts/group/:groupId", postsH.DeleteGroup)
 
@@ -136,6 +170,8 @@ func (s *Server) SetupRoutes() {
 		api.PUT("/integrations/:id/settings", integrationsH.UpdateSettings)
 		api.GET("/integrations/oauth/:provider", integrationsH.GetOAuthURL)
 		api.POST("/integrations/oauth/:provider/callback", integrationsH.OAuthCallback)
+		api.GET("/integrations/:id/plugs", plugsH.ListByIntegration)
+		api.POST("/integrations/:id/plugs", plugsH.Upsert)
 
 		// Media
 		api.GET("/media", mediaH.List)
@@ -174,6 +210,11 @@ func (s *Server) SetupRoutes() {
 		api.POST("/billing/portal", billingH.CreatePortal)
 		api.POST("/billing/cancel", billingH.CancelSubscription)
 		api.GET("/billing/plans", billingH.GetPlans)
+		api.GET("/billing/discount", billingH.CheckDiscount)
+		api.POST("/billing/discount", billingH.ApplyDiscount)
+		api.POST("/billing/trial/finish", billingH.FinishTrial)
+		api.GET("/billing/trial/finished", billingH.IsTrialFinished)
+		api.POST("/billing/lifetime", billingH.ApplyLifetimeDeal)
 
 		// Settings
 		api.GET("/settings", settingsH.GetOrgSettings)
@@ -210,6 +251,40 @@ func (s *Server) SetupRoutes() {
 		api.POST("/oauth-app", oauthAppH.Create)
 		api.PUT("/oauth-app/:id", oauthAppH.Update)
 		api.DELETE("/oauth-app/:id", oauthAppH.Delete)
+
+		// Copilot / AI
+		api.POST("/copilot/chat", copilotH.Chat)
+		api.GET("/copilot/credits", copilotH.GetCredits)
+		api.GET("/copilot/threads", copilotH.ListThreads)
+		api.GET("/copilot/threads/:threadId", copilotH.GetThreadMessages)
+		api.POST("/copilot/generate/draft", copilotH.GenerateDraft)
+		api.POST("/copilot/generate/image", copilotH.GenerateImage)
+		api.POST("/copilot/separate-posts", copilotH.SeparatePosts)
+
+		// Plugs
+		api.GET("/plugs", plugsH.ListAll)
+		api.PUT("/plugs/:id/activate", plugsH.Activate)
+
+		// Customers
+		api.GET("/customers", plugsH.ListCustomers)
+		api.POST("/customers", plugsH.CreateCustomer)
+		api.DELETE("/customers/:id", plugsH.DeleteCustomer)
+
+		// Admin (superadmin only)
+		admin := api.Group("/admin")
+		admin.GET("/errors", adminH.GetErrors)
+		admin.GET("/errors/platforms", adminH.GetErrorPlatforms)
+		admin.GET("/stats", adminH.GetStats)
+		admin.GET("/users", adminH.GetUsers)
+		admin.POST("/subscription", adminH.AddSubscription)
+		admin.POST("/subscription/cancel", adminH.CancelSubscription)
+		admin.POST("/impersonate", adminH.ImpersonateUser)
+
+		// Enterprise
+		enterprise := api.Group("/enterprise")
+		enterprise.POST("/create-user", enterpriseH.CreateUser)
+		enterprise.POST("/url", enterpriseH.GetRedirectParams)
+		enterprise.POST("/delete-channel", enterpriseH.DeleteChannel)
 	}
 
 	// Public API v1 (API key auth)

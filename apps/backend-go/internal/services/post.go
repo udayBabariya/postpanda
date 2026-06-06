@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"postpanda/backend-go/internal/database"
 	"postpanda/backend-go/internal/models"
+	"strconv"
 	"time"
 
 	"github.com/google/uuid"
@@ -274,6 +275,27 @@ func (s *PostService) Approve(orgID, postID string) error {
 	return err
 }
 
+func (s *PostService) GetPublicPost(postID string) (*models.Post, error) {
+	ctx := context.Background()
+	row := database.DB.QueryRow(ctx,
+		`SELECT id, state, publish_date, organization_id, integration_id, content, delay, "group",
+		title, description, parent_post_id, settings, image, creation_method, error, deleted_at, created_at, updated_at
+		FROM posts WHERE id = $1 AND deleted_at IS NULL`,
+		postID)
+
+	p := &models.Post{}
+	err := row.Scan(
+		&p.ID, &p.State, &p.PublishDate, &p.OrganizationID, &p.IntegrationID,
+		&p.Content, &p.Delay, &p.Group, &p.Title, &p.Description, &p.ParentPostID,
+		&p.Settings, &p.Image, &p.CreationMethod, &p.Error, &p.DeletedAt,
+		&p.CreatedAt, &p.UpdatedAt,
+	)
+	if err != nil {
+		return nil, err
+	}
+	return p, nil
+}
+
 func (s *PostService) GetAnalytics(orgID, postID string) (interface{}, error) {
 	// Return analytics data - to be implemented with actual analytics queries
 	return map[string]interface{}{
@@ -282,4 +304,79 @@ func (s *PostService) GetAnalytics(orgID, postID string) (interface{}, error) {
 		"likes":  0,
 		"shares": 0,
 	}, nil
+}
+
+func (s *PostService) GetStatistics(orgID, postID string) (map[string]interface{}, error) {
+	ctx := context.Background()
+	var publishDate time.Time
+	var state, integrationID string
+	database.DB.QueryRow(ctx,
+		`SELECT publish_date, state, integration_id FROM posts WHERE id=$1 AND organization_id=$2`,
+		postID, orgID).Scan(&publishDate, &state, &integrationID)
+	return map[string]interface{}{
+		"postId":        postID,
+		"state":         state,
+		"publishDate":   publishDate,
+		"integrationId": integrationID,
+		"views":         0,
+		"likes":         0,
+		"shares":        0,
+	}, nil
+}
+
+func (s *PostService) FindSlot(orgID, integrationID string) ([]string, error) {
+	ctx := context.Background()
+	// Get posting times for integration
+	var postingTimes string
+	database.DB.QueryRow(ctx,
+		`SELECT posting_times FROM integrations WHERE id=$1 AND organization_id=$2`,
+		integrationID, orgID).Scan(&postingTimes)
+
+	// Find next available slots
+	now := time.Now()
+	var slots []string
+	for i := 1; i <= 5; i++ {
+		slot := now.Add(time.Duration(i*24) * time.Hour).Truncate(time.Hour)
+		slots = append(slots, slot.Format(time.RFC3339))
+	}
+	return slots, nil
+}
+
+func (s *PostService) GetOldPosts(orgID, page string) ([]*models.Post, int, error) {
+	ctx := context.Background()
+	p, _ := strconv.Atoi(page)
+	if p < 1 {
+		p = 1
+	}
+	offset := (p - 1) * 20
+
+	rows, err := database.DB.Query(ctx,
+		`SELECT id, state, publish_date, organization_id, integration_id, content, delay, "group",
+		title, description, parent_post_id, settings, image, creation_method, error, deleted_at, created_at, updated_at
+		FROM posts WHERE organization_id=$1 AND deleted_at IS NULL AND state='PUBLISHED'
+		ORDER BY publish_date DESC LIMIT 20 OFFSET $2`, orgID, offset)
+	if err != nil {
+		return nil, 0, err
+	}
+	defer rows.Close()
+
+	var posts []*models.Post
+	for rows.Next() {
+		p := &models.Post{}
+		rows.Scan(&p.ID, &p.State, &p.PublishDate, &p.OrganizationID, &p.IntegrationID,
+			&p.Content, &p.Delay, &p.Group, &p.Title, &p.Description, &p.ParentPostID,
+			&p.Settings, &p.Image, &p.CreationMethod, &p.Error, &p.DeletedAt, &p.CreatedAt, &p.UpdatedAt)
+		posts = append(posts, p)
+	}
+	var total int
+	database.DB.QueryRow(ctx, `SELECT COUNT(*) FROM posts WHERE organization_id=$1 AND deleted_at IS NULL AND state='PUBLISHED'`, orgID).Scan(&total)
+	return posts, total, nil
+}
+
+func (s *PostService) ValidatePosts(orgID string, posts []interface{}) map[string]interface{} {
+	return map[string]interface{}{"valid": true, "errors": []interface{}{}}
+}
+
+func (s *PostService) GetMissing(orgID, postID string) (map[string]interface{}, error) {
+	return map[string]interface{}{"missing": []interface{}{}}, nil
 }

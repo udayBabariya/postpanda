@@ -199,3 +199,71 @@ func (h *PostsHandler) GetAnalytics(c *gin.Context) {
 
 	c.JSON(http.StatusOK, analytics)
 }
+
+func (h *PostsHandler) GetStatistics(c *gin.Context) {
+	orgID := middleware.GetOrgID(c)
+	postID := c.Param("id")
+	stats, err := h.postSvc.GetStatistics(orgID, postID)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"message": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, stats)
+}
+
+func (h *PostsHandler) FindSlot(c *gin.Context) {
+	orgID := middleware.GetOrgID(c)
+	integrationID := c.Param("id")
+	slots, err := h.postSvc.FindSlot(orgID, integrationID)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"message": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"slots": slots})
+}
+
+func (h *PostsHandler) CheckShortlink(c *gin.Context) {
+	var req struct {
+		URL string `json:"url" binding:"required"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"message": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"shouldShorten": true})
+}
+
+func (h *PostsHandler) GetOldPosts(c *gin.Context) {
+	orgID := middleware.GetOrgID(c)
+	page := c.DefaultQuery("page", "1")
+	posts, total, err := h.postSvc.GetOldPosts(orgID, page)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"message": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"data": posts, "total": total})
+}
+
+func (h *PostsHandler) ValidatePosts(c *gin.Context) {
+	orgID := middleware.GetOrgID(c)
+	var req struct {
+		Posts []interface{} `json:"posts"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"message": err.Error()})
+		return
+	}
+	result := h.postSvc.ValidatePosts(orgID, req.Posts)
+	c.JSON(http.StatusOK, result)
+}
+
+func (h *PostsHandler) GetMissing(c *gin.Context) {
+	orgID := middleware.GetOrgID(c)
+	postID := c.Param("id")
+	missing, err := h.postSvc.GetMissing(orgID, postID)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"message": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, missing)
+}

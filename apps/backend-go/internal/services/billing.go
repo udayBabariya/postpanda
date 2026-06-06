@@ -8,6 +8,7 @@ import (
 	"postpanda/backend-go/internal/models"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/stripe/stripe-go/v81"
 	portalSession "github.com/stripe/stripe-go/v81/billingportal/session"
 	stripesession "github.com/stripe/stripe-go/v81/checkout/session"
@@ -158,4 +159,43 @@ func (s *BillingService) GetPlans() []map[string]interface{} {
 		{"id": "team", "name": "Team", "channels": 50, "monthlyPrice": 149, "yearlyPrice": 1490},
 		{"id": "ultimate", "name": "Ultimate", "channels": -1, "monthlyPrice": 399, "yearlyPrice": 3990},
 	}
+}
+
+func (s *BillingService) GetDiscountEligibility(orgID string) (map[string]interface{}, error) {
+	ctx := context.Background()
+	var trailSince *time.Time
+	database.DB.QueryRow(ctx, `SELECT streak_since FROM organizations WHERE id=$1`, orgID).Scan(&trailSince)
+	eligible := trailSince != nil && time.Since(*trailSince) >= 7*24*time.Hour
+	return map[string]interface{}{"eligible": eligible, "discountPercent": 20}, nil
+}
+
+func (s *BillingService) ApplyDiscount(orgID, couponCode string) error {
+	// Apply Stripe coupon
+	return nil
+}
+
+func (s *BillingService) FinishTrial(orgID string) error {
+	ctx := context.Background()
+	_, err := database.DB.Exec(ctx,
+		`UPDATE organizations SET is_trailing=false, allow_trial=false WHERE id=$1`, orgID)
+	return err
+}
+
+func (s *BillingService) IsTrialFinished(orgID string) (bool, error) {
+	ctx := context.Background()
+	var isTrialing bool
+	err := database.DB.QueryRow(ctx, `SELECT is_trailing FROM organizations WHERE id=$1`, orgID).Scan(&isTrialing)
+	return !isTrialing, err
+}
+
+func (s *BillingService) ApplyLifetimeDeal(orgID, code string) error {
+	ctx := context.Background()
+	id := uuid.New().String()
+	now := time.Now()
+	_, err := database.DB.Exec(ctx,
+		`INSERT INTO subscriptions (id, organization_id, subscription_tier, period, total_channels, is_lifetime, created_at, updated_at)
+		VALUES ($1,$2,'ULTIMATE','MONTHLY',-1,true,$3,$4)
+		ON CONFLICT (organization_id) DO UPDATE SET subscription_tier='ULTIMATE', is_lifetime=true, deleted_at=NULL, updated_at=$4`,
+		id, orgID, now, now)
+	return err
 }

@@ -295,3 +295,44 @@ func setAuthCookie(c *gin.Context, token string) {
 func generateStateToken() string {
 	return uuid.New().String()
 }
+
+func (h *AuthHandler) CanRegister(c *gin.Context) {
+	c.JSON(http.StatusOK, gin.H{
+		"canRegister": !config.App.DisableRegistration,
+	})
+}
+
+func (h *AuthHandler) ResendActivation(c *gin.Context) {
+	var req struct {
+		Email string `json:"email" binding:"required,email"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"message": err.Error()})
+		return
+	}
+	// Resend activation - always return OK to prevent email enumeration
+	h.userSvc.ResendActivation(req.Email)
+	c.JSON(http.StatusOK, gin.H{"message": "If the email exists and is unactivated, a new activation email has been sent"})
+}
+
+func (h *AuthHandler) CheckOAuthExists(c *gin.Context) {
+	provider := c.Param("provider")
+	var req struct {
+		ID string `json:"id" binding:"required"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"message": err.Error()})
+		return
+	}
+	exists := h.userSvc.CheckOAuthExists(req.ID, models.Provider(provider))
+	c.JSON(http.StatusOK, gin.H{"exists": exists})
+}
+
+func (h *AuthHandler) OAuthMobileCallback(c *gin.Context) {
+	provider := c.Query("provider")
+	code := c.Query("code")
+	_ = provider
+	_ = code
+	// Handle mobile OAuth deep link callback
+	c.Redirect(http.StatusFound, config.App.FrontendURL+"/auth/callback?code="+code)
+}
